@@ -179,14 +179,14 @@ function adoptionEvent(type, detail = {}) {
 
 async function loadWebLLM() {
   if (!navigator.gpu) {
-    modelStatus.textContent = "WebGPU is not available in this browser. Fallback mode will keep working.";
+    modelStatus.textContent = "Advanced personalization is not available in this browser. Standard practice mode will keep working.";
     adoptionEvent("model_unavailable", { reason: "no_webgpu" });
     return;
   }
 
-  setStatus("Loading model", "active");
+  setStatus("Preparing", "active");
   loadModelButton.disabled = true;
-  modelStatus.textContent = "Downloading model files. First load can take a while.";
+  modelStatus.textContent = "Preparing your personalized interviewer. First setup can take a little while.";
 
   try {
     const webllm = await import("https://esm.run/@mlc-ai/web-llm");
@@ -194,17 +194,17 @@ async function loadWebLLM() {
       initProgressCallback: report => {
         const progress = Math.round((report.progress || 0) * 100);
         modelProgress.style.width = `${progress}%`;
-        modelStatus.textContent = report.text || `Loading model ${progress}%`;
+        modelStatus.textContent = `Preparing interviewer ${progress}%`;
       }
     });
     webllmReady = true;
-    setStatus("LLM ready", "active");
-    modelStatus.textContent = "WebLLM is ready. Questions and feedback can now adapt to any job title.";
+    setStatus("Ready", "active");
+    modelStatus.textContent = "Personalized interviewer is ready.";
     adoptionEvent("model_loaded", { selectedModel: modelSelect.value });
   } catch (error) {
     webllmReady = false;
-    setStatus("Fallback", "ready");
-    modelStatus.textContent = `WebLLM could not load. Fallback mode is active. ${error.message || ""}`;
+    setStatus("Standard mode", "ready");
+    modelStatus.textContent = "Personalized mode could not start. Standard practice mode is active.";
     adoptionEvent("model_failed", { message: String(error.message || error).slice(0, 160) });
   } finally {
     loadModelButton.disabled = false;
@@ -581,7 +581,7 @@ setupForm.addEventListener("submit", async event => {
   stopRecording();
   setStatus("Preparing", "active");
   stageTitle.textContent = "Preparing questions";
-  questionText.textContent = webllmReady ? "Generating personalized questions in the browser..." : "Preparing offline fallback questions...";
+  questionText.textContent = webllmReady ? "Generating personalized questions..." : "Preparing standard practice questions...";
   const profile = profileFromForm();
   session = {
     profile,
@@ -590,7 +590,7 @@ setupForm.addEventListener("submit", async event => {
     index: 0
   };
   adoptionEvent("interview_started", { rounds: profile.selectedRounds.join(","), questionCount: session.questions.length, jobTitleLength: profile.jobTitle.length });
-  setStatus(webllmReady ? "LLM active" : "Fallback");
+  setStatus(webllmReady ? "Personalized" : "Standard");
   renderQuestion();
 });
 
@@ -644,7 +644,7 @@ submitButton.addEventListener("click", async () => {
     return;
   }
   setTimeout(() => {
-    setStatus(webllmReady ? "LLM active" : "Fallback");
+    setStatus(webllmReady ? "Personalized" : "Standard");
     renderQuestion();
   }, question.round === "aptitude" ? 700 : 2400);
 });
