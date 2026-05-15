@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Interviewer WebLLM</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark">AI</div>
+          <div>
+            <p class="eyebrow">Zero-cost browser LLM</p>
+            <h1>AI Interviewer</h1>
+          </div>
+        </div>
+
+        <section class="model-panel">
+          <div>
+            <h2>Open-source model</h2>
+            <p id="modelStatus">Rule-based fallback is active. Load WebLLM for dynamic questions and feedback.</p>
+          </div>
+          <select id="modelSelect" aria-label="Model">
+            <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5 0.5B - faster</option>
+            <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B - better</option>
+          </select>
+          <button id="loadModel" type="button" class="secondary-action">Load WebLLM</button>
+          <div class="progress-track"><div id="modelProgress"></div></div>
+        </section>
+
+        <form id="setupForm" class="setup-form">
+          <label>
+            Student name
+            <input name="studentName" value="Aarav Sharma" autocomplete="name" />
+          </label>
+
+          <label>
+            Target job title
+            <input name="jobTitle" value="Cybersecurity Analyst Intern" />
+          </label>
+
+          <label>
+            Experience level
+            <select name="experienceLevel">
+              <option>Fresher</option>
+              <option>Final-year student</option>
+              <option>Internship experience</option>
+              <option>1 year experience</option>
+            </select>
+          </label>
+
+          <label>
+            Academic background
+            <textarea name="academicBackground" rows="3">B.Tech Computer Science student with coursework in networks, database systems, operating systems, and software engineering.</textarea>
+          </label>
+
+          <label>
+            Skills
+            <input name="skills" value="Python, Linux, Networking, SQL, JavaScript" />
+          </label>
+
+          <fieldset class="round-picker">
+            <legend>Choose interview rounds</legend>
+            <label class="check-row">
+              <input type="checkbox" name="selectedRounds" value="aptitude" checked />
+              <span>Aptitude MCQ</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" name="selectedRounds" value="gd" checked />
+              <span>Group discussion</span>
+            </label>
+            <label class="check-row">
+              <input type="checkbox" name="selectedRounds" value="technical" checked />
+              <span>Technical interview</span>
+            </label>
+          </fieldset>
+
+          <label>
+            Upload resume
+            <input id="resumeFile" type="file" accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
+          </label>
+          <input type="hidden" name="resumeText" id="resumeText" />
+          <input type="hidden" name="resumeFileName" id="resumeFileName" />
+          <p class="form-note" id="resumeStatus">Resume upload is optional. Add details below if extraction is limited.</p>
+
+          <label>
+            Resume and project details
+            <textarea name="resumeDetails" rows="5">Built a secure student placement portal with login, role-based access, aptitude quizzes, interview scheduling, and analytics dashboards.</textarea>
+          </label>
+
+          <details class="analytics-settings">
+            <summary>Adoption logging</summary>
+            <label>
+              Optional log endpoint
+              <input id="logEndpoint" placeholder="Google Apps Script / webhook URL" />
+            </label>
+            <p class="form-note">Only anonymous usage events are sent. Answers and resume text are never logged.</p>
+          </details>
+
+          <button type="submit" class="primary-action">Start interview</button>
+        </form>
+      </aside>
+
+      <section class="interview-stage">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Live simulation</p>
+            <h2 id="stageTitle">Configure your interview</h2>
+          </div>
+          <div class="status-pill" id="statusPill">Ready</div>
+        </header>
+
+        <section class="interviewer-panel">
+          <div class="avatar" aria-hidden="true">
+            <div class="avatar-ring"></div>
+            <div class="avatar-face"><span></span><span></span></div>
+          </div>
+          <div class="question-card">
+            <div class="question-meta">
+              <span id="questionType">Aptitude + GD + Technical</span>
+              <span id="questionProgress">0 / 27</span>
+            </div>
+            <p id="questionText">Load WebLLM for dynamic role-aware interview intelligence, or start directly with the offline fallback.</p>
+          </div>
+        </section>
+
+        <section class="answer-panel">
+          <div id="mcqOptions" class="mcq-options"></div>
+          <div class="toolbar">
+            <button id="speakQuestion" class="icon-button" type="button" title="Speak question" aria-label="Speak question">▶</button>
+            <button id="recordAnswer" class="record-button" type="button">Start answering</button>
+            <button id="submitAnswer" class="secondary-action" type="button" disabled>Submit answer</button>
+          </div>
+          <textarea id="answerText" rows="5" placeholder="Your spoken answer will appear here. You can also type or edit before submitting."></textarea>
+          <p class="voice-note" id="voiceNote">Chrome or Edge is recommended for WebGPU and voice input.</p>
+        </section>
+
+        <section class="feedback-grid">
+          <article class="feedback-card">
+            <div class="card-heading">
+              <h3>Latest feedback</h3>
+              <strong id="latestScore">--</strong>
+            </div>
+            <p id="feedbackHeadline">Feedback will appear after your first answer.</p>
+            <div id="dimensionScores" class="dimension-scores"></div>
+            <div class="feedback-columns">
+              <div>
+                <h4>Strengths</h4>
+                <ul id="strengthList"></ul>
+              </div>
+              <div>
+                <h4>Improve</h4>
+                <ul id="improvementList"></ul>
+              </div>
+            </div>
+          </article>
+
+          <article class="feedback-card report-card">
+            <div class="card-heading">
+              <h3>Final report</h3>
+              <strong id="overallScore">--</strong>
+            </div>
+            <p id="verdictText">Complete selected rounds to unlock your report.</p>
+            <div id="competencyBars" class="bars"></div>
+            <button id="exportEvents" type="button" class="text-action">Export local adoption events</button>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
