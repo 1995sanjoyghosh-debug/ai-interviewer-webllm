@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simple RAG Bot</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <h1>Simple RAG Bot</h1>
+    <p>Ask a question and the bot will answer from the knowledge base.</p>
+    <form id="query-form">
+      <label for="question">Question</label>
+      <input id="question" name="question" type="text" placeholder="What is your refund policy?" required />
+      <button type="submit">Ask</button>
+    </form>
+    <section id="result" class="hidden">
+      <h2>Answer</h2>
+      <p id="answer"></p>
+    </section>
+    <section id="error" class="hidden"></section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

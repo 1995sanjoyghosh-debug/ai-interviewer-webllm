@@ -4,7 +4,8 @@
   "description": "A simple beginner-friendly RAG bot prototype",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js",
+    "start": "node server.js",
+    "cli": "node app.js",
     "test": "node --test"
   }
 }
