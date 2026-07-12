@@ -1,0 +1,10 @@
+{
+  "name": "simple-rag-bot",
+  "version": "1.0.0",
+  "description": "A simple beginner-friendly RAG bot prototype",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "node --test"
+  }
+}
