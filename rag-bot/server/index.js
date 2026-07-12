@@ -20,7 +20,12 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-const upload = multer({ dest: uploadDir });
+const upload = multer({
+  dest: uploadDir,
+  limits: {
+    fileSize: 12 * 1024 * 1024,
+  },
+});
 const hfApiKey = process.env.HUGGINGFACE_API_KEY;
 const embeddingModel = process.env.HF_EMBEDDING_MODEL || 'sentence-transformers/all-MiniLM-L6-v2';
 const completionModel = process.env.HF_COMPLETION_MODEL || 'google/flan-t5-large';
@@ -113,23 +118,31 @@ async function queryModel(prompt) {
 }
 
 app.post('/api/load', upload.single('file'), async (req, res) => {
+  let uploadedPath = req.file?.path;
+
   try {
     if (!hfApiKey) {
       return res.status(500).json({ error: 'HUGGINGFACE_API_KEY is not configured. Add it to rag-bot/.env and restart the server.' });
     }
 
     let text = '';
-    let source = 'web link';
+    let source = '';
 
-    if (req.body.url) {
-      source = req.body.url;
-      text = await textFromUrl(req.body.url);
+    if (req.file) {
+      source = req.file.originalname;
+      text = await textFromFile(req.file);
+    } else if (req.body.text?.trim()) {
+      source = 'Pasted text';
+      text = req.body.text.trim();
+    } else if (req.body.url?.trim()) {
+      source = req.body.url.trim();
+      text = await textFromUrl(source);
     } else {
-      return res.status(400).json({ error: 'Please provide a URL in the request body.' });
+      return res.status(400).json({ error: 'Upload a PDF, DOCX, or text file, paste text, or provide a URL.' });
     }
 
     if (!text || !text.trim()) {
-      return res.status(400).json({ error: 'No readable content was found at the provided URL.' });
+      return res.status(400).json({ error: 'No readable content was found in that source.' });
     }
 
     const docId = require('crypto').randomUUID();
@@ -152,6 +165,10 @@ app.post('/api/load', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('Load error', error?.message || error);
     return res.status(500).json({ error: 'Failed to ingest document. Check the document format and try again.' });
+  } finally {
+    if (uploadedPath) {
+      fs.promises.unlink(uploadedPath).catch(() => {});
+    }
   }
 });
 

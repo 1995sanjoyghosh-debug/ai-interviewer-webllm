@@ -1,18 +1,52 @@
 import { useState } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000';
+const sourceModes = ['file', 'text', 'url'];
 
 function App() {
+  const [sourceMode, setSourceMode] = useState('file');
   const [url, setUrl] = useState('');
+  const [text, setText] = useState('');
+  const [file, setFile] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [docId, setDocId] = useState('');
+  const [documentName, setDocumentName] = useState('');
   const [messages, setMessages] = useState([]);
   const [citations, setCitations] = useState([]);
-  const [status, setStatus] = useState('Paste a web link to start chatting with the document.');
+  const [status, setStatus] = useState('Add a document source to begin.');
   const [loading, setLoading] = useState(false);
 
   const addMessage = (role, content) => {
     setMessages((prev) => [...prev, { role, content }]);
+  };
+
+  const buildFormData = () => {
+    const formData = new FormData();
+
+    if (sourceMode === 'file') {
+      if (!file) {
+        throw new Error('Choose a PDF, DOCX, or text file first.');
+      }
+
+      formData.append('file', file);
+      return formData;
+    }
+
+    if (sourceMode === 'text') {
+      if (!text.trim()) {
+        throw new Error('Paste some document text first.');
+      }
+
+      formData.append('text', text.trim());
+      return formData;
+    }
+
+    if (!url.trim()) {
+      throw new Error('Enter a web link first.');
+    }
+
+    formData.append('url', url.trim());
+    return formData;
   };
 
   const handleIngest = async (event) => {
@@ -21,18 +55,12 @@ function App() {
     setMessages([]);
     setCitations([]);
     setDocId('');
+    setDocumentName('');
 
     try {
-      const formData = new FormData();
-      if (url.trim()) {
-        formData.append('url', url.trim());
-      } else {
-        throw new Error('Please enter a web link to ingest.');
-      }
-
       const response = await fetch(`${API_BASE}/api/load`, {
         method: 'POST',
-        body: formData,
+        body: buildFormData(),
       });
 
       const result = await response.json();
@@ -41,8 +69,9 @@ function App() {
       }
 
       setDocId(result.docId);
-      setStatus(`Document ready: ${result.source}`);
-      addMessage('assistant', 'I can answer questions about this document. Ask me anything.');
+      setDocumentName(result.source);
+      setStatus(`Ready: ${result.chunkCount} searchable chunks loaded.`);
+      addMessage('assistant', `Loaded "${result.source}". Ask a question or request a summary.`);
     } catch (error) {
       setStatus('Ingest failed.');
       addMessage('assistant', error.message);
@@ -55,12 +84,12 @@ function App() {
     event.preventDefault();
     const trimmed = chatInput.trim();
 
-    if (!trimmed) {
+    if (!trimmed || loading) {
       return;
     }
 
     if (!docId) {
-      setStatus('Ingest a link before chatting.');
+      setStatus('Load a document before chatting.');
       return;
     }
 
@@ -82,7 +111,7 @@ function App() {
 
       addMessage('assistant', result.answer);
       setCitations(result.citations || []);
-      setStatus('Answer generated successfully.');
+      setStatus('Answer generated.');
     } catch (error) {
       addMessage('assistant', error.message);
       setStatus('Query failed.');
@@ -91,91 +120,160 @@ function App() {
     }
   };
 
-  const clearChat = () => {
+  const clearChat = async () => {
     setMessages([]);
     setCitations([]);
-    setStatus('Chat cleared. You can ask another question.');
+
+    if (!docId) {
+      setStatus('Chat cleared.');
+      return;
+    }
+
+    try {
+      await fetch(`${API_BASE}/api/clear-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docId }),
+      });
+      setStatus('Chat cleared.');
+    } catch {
+      setStatus('Local chat cleared. Server history may still exist.');
+    }
   };
 
   return (
-    <div className="app-shell">
-      <header>
-        <h1>Document Chat Bot</h1>
-        <p>Paste a web link and chat with the linked document. Responses are returned with citation markers.</p>
+    <main className="app-shell">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">RAG workspace</p>
+          <h1>Document Chat Bot</h1>
+        </div>
+        <div className="status-pill">{loading ? 'Working' : 'Ready'}</div>
       </header>
 
-      <section className="panel hero-panel">
-        <div>
-          <h2>Enter a link to start</h2>
-          <p>Only a web link is required — no file upload needed.</p>
-        </div>
-        <form onSubmit={handleIngest} className="link-form">
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com/article"
-            disabled={loading}
-          />
-          <button type="submit" disabled={loading}>Ingest Link</button>
-        </form>
-      </section>
-
-      <section className="panel chat-panel">
-        <div className="chat-header">
-          <div>
-            <h2>Chat with the document</h2>
-            <p className="subtext">Ask questions and get answers with citations.</p>
+      <section className="workspace">
+        <aside className="source-panel">
+          <div className="panel-heading">
+            <h2>Source</h2>
+            <p>{documentName || 'No document loaded'}</p>
           </div>
-          <button type="button" className="secondary" onClick={clearChat} disabled={!docId || loading}>
-            Clear chat
-          </button>
-        </div>
 
-        <div className="chat-window">
-          {messages.length === 0 ? (
-            <div className="empty-state">Ingest a link and start asking questions about the document.</div>
-          ) : (
-            messages.map((message, index) => (
-              <div key={index} className={`bubble ${message.role}`}>
-                <span className="bubble-title">{message.role === 'user' ? 'You' : 'Bot'}</span>
-                <p>{message.content}</p>
-              </div>
-            ))
-          )}
-        </div>
-
-        <form onSubmit={handleChat} className="chat-form">
-          <input
-            type="text"
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            placeholder="Ask anything about the ingested webpage"
-            disabled={loading || !docId}
-          />
-          <button type="submit" disabled={loading || !docId}>Send</button>
-        </form>
-
-        {citations.length > 0 && (
-          <div className="citations-panel">
-            <h3>Citations</h3>
-            <ul>
-              {citations.map((source) => (
-                <li key={source.id}>
-                  <span className="citation-label">{source.label}</span>
-                  <span>{source.text}</span>
-                </li>
+          <form onSubmit={handleIngest} className="source-form">
+            <div className="segmented" aria-label="Document source type">
+              {sourceModes.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={sourceMode === mode ? 'active' : ''}
+                  onClick={() => setSourceMode(mode)}
+                  disabled={loading}
+                >
+                  {mode}
+                </button>
               ))}
-            </ul>
-          </div>
-        )}
-      </section>
+            </div>
 
-      <section className="panel status-panel">
-        <h2>Status</h2>
-        <p>{status}</p>
+            {sourceMode === 'file' && (
+              <label className="field">
+                <span>Document file</span>
+                <input
+                  type="file"
+                  accept=".pdf,.docx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(event) => setFile(event.target.files?.[0] || null)}
+                  disabled={loading}
+                />
+              </label>
+            )}
+
+            {sourceMode === 'text' && (
+              <label className="field">
+                <span>Pasted text</span>
+                <textarea
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  placeholder="Paste document text here"
+                  disabled={loading}
+                />
+              </label>
+            )}
+
+            {sourceMode === 'url' && (
+              <label className="field">
+                <span>Web link</span>
+                <input
+                  type="url"
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="https://example.com/article"
+                  disabled={loading}
+                />
+              </label>
+            )}
+
+            <button type="submit" className="primary-action" disabled={loading}>
+              {loading ? 'Loading...' : 'Load document'}
+            </button>
+          </form>
+
+          <div className="status-block">
+            <span>Status</span>
+            <p>{status}</p>
+          </div>
+        </aside>
+
+        <section className="chat-panel">
+          <div className="chat-header">
+            <div>
+              <h2>Chat</h2>
+              <p>{docId ? 'Ask about the loaded document.' : 'Load a source to unlock chat.'}</p>
+            </div>
+            <button type="button" className="secondary" onClick={clearChat} disabled={loading || messages.length === 0}>
+              Clear
+            </button>
+          </div>
+
+          <div className="chat-window">
+            {messages.length === 0 ? (
+              <div className="empty-state">No messages yet.</div>
+            ) : (
+              messages.map((message, index) => (
+                <div key={`${message.role}-${index}`} className={`bubble ${message.role}`}>
+                  <span>{message.role === 'user' ? 'You' : 'Bot'}</span>
+                  <p>{message.content}</p>
+                </div>
+              ))
+            )}
+          </div>
+
+          <form onSubmit={handleChat} className="chat-form">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              placeholder="Ask a question or type: summarize this document"
+              disabled={loading || !docId}
+            />
+            <button type="submit" disabled={loading || !docId || !chatInput.trim()}>
+              Send
+            </button>
+          </form>
+
+          {citations.length > 0 && (
+            <div className="citations-panel">
+              <h3>Citations</h3>
+              <ul>
+                {citations.map((source) => (
+                  <li key={source.id}>
+                    <span className="citation-label">{source.label}</span>
+                    <span>{source.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
       </section>
-    </div>
+    </main>
   );
 }
 
