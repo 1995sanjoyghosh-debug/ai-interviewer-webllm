@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Dict, Union
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
@@ -33,7 +34,7 @@ def format_utc_offset(now: datetime) -> str:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
+async def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
@@ -43,7 +44,7 @@ async def get_us_time(
         default="eastern",
         description="US zone key: eastern, central, mountain, pacific, alaska, hawaii",
     ),
-) -> dict[str, str | int | float]:
+) -> Dict[str, Union[str, int, float]]:
     zone_name = US_TIME_ZONES.get(tz.lower())
     if zone_name is None:
         valid_zones = ", ".join(sorted(US_TIME_ZONES))
