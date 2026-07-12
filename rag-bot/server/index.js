@@ -75,9 +75,11 @@ async function embedDocumentChunks(text) {
   return chunks.map((chunk, index) => ({ text: chunk, embedding: embeddings[index] }));
 }
 
-function buildPrompt(question, chunks) {
+function buildPrompt(question, chunks, history = []) {
   const context = chunks.map((chunk, index) => `Chunk ${index + 1}: ${chunk.text}`).join('\n\n');
-  return `You are an assistant that summarizes documents and answers questions using only the supplied document context.\n\n${context}\n\nQuestion: ${question}\n\nAnswer:`;
+  const recentHistory = history.slice(-6).map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}: ${entry.content}`).join('\n');
+
+  return `You are a helpful document chat assistant. Answer using only the supplied document context. If the answer is not clearly supported by the document, say that you cannot tell from the document.\n\nConversation history:\n${recentHistory || 'None.'}\n\nRelevant document context:\n${context || 'No relevant context was found.'}\n\nCurrent user question: ${question}\n\nAnswer:`;
 }
 
 async function queryModel(prompt) {
@@ -126,6 +128,7 @@ app.post('/api/load', upload.single('file'), async (req, res) => {
       source,
       text,
       chunks,
+      messages: [],
       createdAt: new Date().toISOString(),
     };
 
@@ -154,6 +157,7 @@ app.post('/api/query', async (req, res) => {
       ? question.trim()
       : 'Summarize the uploaded document in a few concise paragraphs.';
 
+    const history = Array.isArray(doc.messages) ? doc.messages : [];
     const queryEmbedding = await embedder.embedQuery(promptQuestion);
     const ranked = doc.chunks
       .map((chunk) => ({
@@ -164,16 +168,40 @@ app.post('/api/query', async (req, res) => {
       .slice(0, 4)
       .map((item) => item.chunk);
 
-    const prompt = buildPrompt(promptQuestion, ranked);
+    const prompt = buildPrompt(promptQuestion, ranked, history);
     const answer = await queryModel(prompt);
+    const assistantReply = answer.trim();
+
+    doc.messages.push(
+      { role: 'user', content: promptQuestion },
+      { role: 'assistant', content: assistantReply }
+    );
 
     return res.json({
-      answer: answer.trim(),
+      answer: assistantReply,
       chunks: ranked.map((chunk) => chunk.text),
+      history: doc.messages,
     });
   } catch (error) {
     console.error('Query error', error?.message || error);
     return res.status(500).json({ error: 'Failed to generate an answer. Try again in a moment.' });
+  }
+});
+
+app.post('/api/clear-chat', async (req, res) => {
+  try {
+    const { docId } = req.body;
+    const doc = documents[docId];
+
+    if (!doc) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+
+    doc.messages = [];
+    return res.json({ success: true, message: 'Chat history cleared.' });
+  } catch (error) {
+    console.error('Clear chat error', error?.message || error);
+    return res.status(500).json({ error: 'Could not clear the chat history.' });
   }
 });
 
