@@ -25,6 +25,10 @@ const hfApiKey = process.env.HUGGINGFACE_API_KEY;
 const embeddingModel = process.env.HF_EMBEDDING_MODEL || 'sentence-transformers/all-MiniLM-L6-v2';
 const completionModel = process.env.HF_COMPLETION_MODEL || 'google/flan-t5-large';
 
+if (!hfApiKey) {
+  console.warn('Missing HUGGINGFACE_API_KEY. Add a .env file with HUGGINGFACE_API_KEY=your_key.');
+}
+
 const embedder = new HuggingFaceInferenceEmbeddings({
   model: embeddingModel,
   apiKey: hfApiKey,
@@ -62,7 +66,14 @@ async function textFromFile(file) {
 }
 
 async function textFromUrl(url) {
-  const response = await axios.get(url, { timeout: 20000 });
+  const response = await axios.get(url, {
+    timeout: 20000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+
   const html = response.data;
   const $ = cheerio.load(html);
   const pageText = $('body').text();
@@ -79,7 +90,7 @@ function buildPrompt(question, chunks, history = []) {
   const context = chunks.map((chunk, index) => `Chunk ${index + 1}: ${chunk.text}`).join('\n\n');
   const recentHistory = history.slice(-6).map((entry) => `${entry.role === 'user' ? 'User' : 'Assistant'}: ${entry.content}`).join('\n');
 
-  return `You are a helpful document chat assistant. Answer using only the supplied document context. If the answer is not clearly supported by the document, say that you cannot tell from the document.\n\nConversation history:\n${recentHistory || 'None.'}\n\nRelevant document context:\n${context || 'No relevant context was found.'}\n\nCurrent user question: ${question}\n\nAnswer:`;
+  return `You are a helpful document chat assistant. Use only the supplied document context. Answer the user question and include inline citations in square brackets such as [1] or [2] to reference the most relevant context chunks. If the document doesn't contain the answer, say that you cannot answer from this document.\n\nConversation history:\n${recentHistory || 'None.'}\n\nRelevant document context:\n${context || 'No relevant context was found.'}\n\nCurrent user question: ${question}\n\nAnswer with citations:`;
 }
 
 async function queryModel(prompt) {
@@ -103,22 +114,22 @@ async function queryModel(prompt) {
 
 app.post('/api/load', upload.single('file'), async (req, res) => {
   try {
-    let text = '';
-    let source = 'text';
+    if (!hfApiKey) {
+      return res.status(500).json({ error: 'HUGGINGFACE_API_KEY is not configured. Add it to rag-bot/.env and restart the server.' });
+    }
 
-    if (req.file) {
-      source = req.file.originalname || 'uploaded file';
-      text = await textFromFile(req.file);
-      fs.unlinkSync(req.file.path);
-    } else if (req.body.url) {
+    let text = '';
+    let source = 'web link';
+
+    if (req.body.url) {
       source = req.body.url;
       text = await textFromUrl(req.body.url);
-    } else if (req.body.text) {
-      text = req.body.text;
+    } else {
+      return res.status(400).json({ error: 'Please provide a URL in the request body.' });
     }
 
     if (!text || !text.trim()) {
-      return res.status(400).json({ error: 'No readable content was provided.' });
+      return res.status(400).json({ error: 'No readable content was found at the provided URL.' });
     }
 
     const docId = require('crypto').randomUUID();
@@ -177,9 +188,15 @@ app.post('/api/query', async (req, res) => {
       { role: 'assistant', content: assistantReply }
     );
 
+    const citations = ranked.map((chunk, index) => ({
+      id: index + 1,
+      label: `[${index + 1}]`,
+      text: chunk.text.length > 220 ? `${chunk.text.slice(0, 220).trim()}...` : chunk.text,
+    }));
+
     return res.json({
       answer: assistantReply,
-      chunks: ranked.map((chunk) => chunk.text),
+      citations,
       history: doc.messages,
     });
   } catch (error) {
