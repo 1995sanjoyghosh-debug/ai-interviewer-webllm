@@ -1,4 +1,5 @@
 import io
+import math
 import os
 import re
 import uuid
@@ -9,16 +10,10 @@ from docx import Document
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from langchain.embeddings import SentenceTransformerEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from PyPDF2 import PdfReader
-import chromadb
-from chromadb.config import Settings
 import httpx
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CHROMA_DIR = os.path.join(BASE_DIR, "..", "chroma_db")
-os.makedirs(CHROMA_DIR, exist_ok=True)
 
 HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY", "")
 COMPLETION_MODEL = os.getenv("HF_COMPLETION_MODEL", "google/flan-t5-large")
@@ -38,17 +33,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-client = chromadb.Client(
-    Settings(
-        chroma_db_impl="duckdb+parquet",
-        persist_directory=CHROMA_DIR,
-    )
-)
-collection = client.get_or_create_collection(name="documents")
-
-embedder = SentenceTransformerEmbeddings(model_name=EMBEDDING_MODEL)
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=120)
 
 documents: Dict[str, Any] = {}
 
@@ -89,19 +73,60 @@ async def fetch_url_text(url: str) -> str:
         return " ".join(soup.stripped_strings)
 
 
-def extract_text_from_file(file: UploadFile) -> str:
-    content = file.file.read()
-    ext = os.path.splitext(file.filename or "")[-1].lower()
+def split_text(text: str, max_chunk_size: int = 300, overlap: int = 60) -> List[str]:
+    words = text.split()
+    if not words:
+        return []
 
-    if ext == ".pdf":
-        reader = PdfReader(io.BytesIO(content))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    chunks: List[str] = []
+    start = 0
+    while start < len(words):
+        end = min(start + max_chunk_size, len(words))
+        chunks.append(" ".join(words[start:end]))
+        if end >= len(words):
+            break
+        start += max_chunk_size - overlap
+    return chunks
 
-    if ext == ".docx":
-        document = Document(io.BytesIO(content))
-        return "\n".join(paragraph.text for paragraph in document.paragraphs)
 
-    return content.decode("utf-8", errors="ignore")
+def cosine_similarity(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    return dot / (norm_a * norm_b + 1e-12)
+
+
+async def get_embedding(text: str) -> List[float]:
+    if not HF_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="HUGGINGFACE_API_KEY is required for embeddings."
+        )
+
+    api_url = f"https://api-inference.huggingface.co/models/{EMBEDDING_MODEL}"
+    async with httpx.AsyncClient(timeout=60.0) as http_client:
+        response = await http_client.post(
+            api_url,
+            headers={"Authorization": f"Bearer {HF_API_KEY}"},
+            json={"inputs": text, "options": {"wait_for_model": True}},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    if isinstance(data, dict) and "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+
+    if isinstance(data, list) and data and isinstance(data[0], list):
+        return [float(x) for x in data[0]]
+    if isinstance(data, list):
+        return [float(x) for x in data]
+
+    raise HTTPException(
+        status_code=500,
+        detail="Unexpected embedding response format from Hugging Face."
+    )
 
 
 async def query_model(prompt: str) -> str:
@@ -130,6 +155,21 @@ async def query_model(prompt: str) -> str:
         return str(data)
 
 
+def extract_text_from_file(file: UploadFile) -> str:
+    content = file.file.read()
+    ext = os.path.splitext(file.filename or "")[-1].lower()
+
+    if ext == ".pdf":
+        reader = PdfReader(io.BytesIO(content))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    if ext == ".docx":
+        document = Document(io.BytesIO(content))
+        return "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    return content.decode("utf-8", errors="ignore")
+
+
 @app.post("/api/ingest")
 async def ingest(
     file: Optional[UploadFile] = File(None),
@@ -153,21 +193,13 @@ async def ingest(
     if not text_data or not text_data.strip():
         raise HTTPException(status_code=400, detail="No readable content was found.")
 
-    chunks = text_splitter.split_text(text_data)
-    embeddings = embedder.embed_documents(chunks)
+    chunks = split_text(text_data)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="Document text was too short to process.")
 
-    ids = [f"{uuid.uuid4()}" for _ in chunks]
-    metadatas = [
-        {"doc_id": source, "source": source, "chunk_index": idx + 1}
-        for idx in range(len(chunks))
-    ]
-
-    collection.add(
-        ids=ids,
-        documents=chunks,
-        metadatas=metadatas,
-        embeddings=embeddings,
-    )
+    embeddings: List[List[float]] = []
+    for chunk in chunks:
+        embeddings.append(await get_embedding(chunk))
 
     embedding_tokens = sum(estimate_tokens(chunk) for chunk in chunks)
     embedding_cost = estimate_cost(embedding_tokens, COST_PER_1000_EMBEDDING_TOKENS)
@@ -176,6 +208,8 @@ async def ingest(
     documents[doc_id] = {
         "source": source,
         "chunk_count": len(chunks),
+        "chunks": chunks,
+        "embeddings": embeddings,
         "messages": [],
         "usage": {
             "embedding_tokens": embedding_tokens,
@@ -202,17 +236,16 @@ async def query(doc_id: str = Form(...), question: str = Form(...)):
         raise HTTPException(status_code=404, detail="Document not found.")
 
     prompt_text = question.strip() or "Summarize the uploaded document in a few concise paragraphs."
-    query_embedding = embedder.embed_query(prompt_text)
+    query_embedding = await get_embedding(prompt_text)
 
-    query_result = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=4,
-        where={"doc_id": document["source"]},
-        include=["documents", "metadatas", "distances"],
-    )
-    retrieved = query_result.get("documents", [[]])[0]
+    scored_chunks = [
+        (idx, cosine_similarity(query_embedding, embedding))
+        for idx, embedding in enumerate(document["embeddings"])
+    ]
+    scored_chunks.sort(key=lambda item: item[1], reverse=True)
+    top_indices = [idx for idx, score in scored_chunks[:4]]
+    relevant_chunks = [document["chunks"][idx] for idx in top_indices if idx < len(document["chunks"])]
 
-    relevant_chunks = [chunk for chunk in retrieved if chunk]
     prompt = build_prompt(prompt_text, relevant_chunks, document["messages"])
     answer = await query_model(prompt)
 
