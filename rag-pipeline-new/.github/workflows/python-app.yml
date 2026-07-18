@@ -1,0 +1,48 @@
+name: Python React RAG CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r rag-pipeline-new/requirements.txt
+
+      - name: Check Python syntax
+        run: python -m py_compile rag-pipeline-new/app/main.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: rag-pipeline-new/client
+        run: npm install
+
+      - name: Build frontend
+        working-directory: rag-pipeline-new/client
+        run: npm run build
+
+      - name: Run backend smoke test
+        run: |
+          python -m uvicorn rag-pipeline-new.app.main:app --host 127.0.0.1 --port 8000 &
+          PID=$!
+          sleep 6
+          curl --fail http://127.0.0.1:8000/api/health
+          kill $PID
