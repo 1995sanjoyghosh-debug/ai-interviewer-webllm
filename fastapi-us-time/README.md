@@ -6,6 +6,14 @@ Async FastAPI service that returns the current US time.
 
 ```powershell
 cd fastapi-us-time
+.\setup.ps1
+```
+
+The setup script installs a portable Python runtime into `.python` and then installs the dependencies from `requirements.txt`.
+
+If you already have Python installed globally, you can use the classic virtual environment flow instead:
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -13,16 +21,34 @@ pip install -r requirements.txt
 
 ## Run locally
 
+Easiest start command:
+
+```powershell
+.\start.ps1
+```
+
 Single worker for development:
 
 ```powershell
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+Or on Windows:
+
+```powershell
+.\run-dev.ps1
+```
+
 Multiple workers for traffic testing:
 
 ```powershell
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+Or on Windows:
+
+```powershell
+.\run-workers.ps1
 ```
 
 ## Endpoint
